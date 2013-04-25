@@ -13,6 +13,7 @@ package main
  *     import "math"
  */
 import (
+	"code.google.com/p/go-tour/tree"
 	"code.google.com/p/go-tour/wc"
 	"fmt"
 	"math"
@@ -228,19 +229,42 @@ func page19_Forever() {
 }
 
 func page20_If() {
-	fmt.Println(sqrt(2), sqrt(-4))
-}
+	/*
+	 * Question:
+	 * Is it possible to call the function itself like javascript's
+	 * "arguments.callee.call(args)" form?
+	 */
 
-/*
- * Question:
- * Is it possible to call the function itself like javascript's
- * "arguments.callee.call(args)" form?
- */
-func sqrt(x float64) string {
-	if x < 0 {
-		return sqrt(-x) + "i"
+	// short variable declaration: Not work!
+	/*
+		sqrt := func(x float64) string {
+			if x < 0 {
+				return sqrt(-x) + "i"
+			}
+			return fmt.Sprint(math.Sqrt(x))
+		}
+	*/
+
+	// normal variable declaration: Not work!
+	/*
+		var sqrt = func(x float64) string {
+			if x < 0 {
+				return sqrt(-x) + "i"
+			}
+			return fmt.Sprint(math.Sqrt(x))
+		}
+	*/
+
+	// declare first, then implement it: Does work!!
+	var sqrt func(float64) string
+	sqrt = func(x float64) string {
+		if x < 0 {
+			return sqrt(-x) + "i"
+		}
+		return fmt.Sprint(math.Sqrt(x))
 	}
-	return fmt.Sprint(math.Sqrt(x))
+
+	fmt.Println(sqrt(2), sqrt(-4))
 }
 
 /*
@@ -943,6 +967,610 @@ func page62_Goroutines() {
 	say("hello")
 }
 
+/*
+ * Channels are a typed conduit through which you can send and receive values
+ * with the channel operator, <-.
+ *
+ *     ch <- v   // Send v to channel ch.
+ *     v := <-ch // Receive from ch, and assign value to v.
+ *
+ * (The data flows in the direction of arrow.)
+ *
+ * Like maps and slices, channels must be created before use:
+ *
+ *     ch := make(chan int)
+ *
+ * By default, sends and receives block until the other side is ready. This
+ * allows goroutines to synchronize without explicit locks or condition
+ * variables.
+ */
+func page63_Channels() {
+	sum := func(a []int, c chan int) {
+		sum := 0
+		for _, v := range a {
+			sum += v
+		}
+		c <- sum // send sum to c
+	}
+
+	a := []int{7, 2, 8, -9, 4, 0}
+	c := make(chan int)
+	go sum(a[:len(a)/2], c)
+	go sum(a[len(a)/2:], c)
+	x, y := <-c, <-c // receive from c
+
+	fmt.Println(x, y, x+y)
+}
+
+/*
+ * Channels can be buffered. Provide the buffer length as the second argument
+ * to make to initialize a buffered channel:
+ *
+ *     ch := make(chan int, 100)
+ *
+ * Sends to a buffered channel block only when the buffer is full.
+ * Receives block when the buffer is empty.
+ */
+func page64_BufferedChannels() {
+	c := make(chan int, 2)
+	c <- 1
+	c <- 2
+
+	// throw: all goroutines are asleep - deadlock!
+	// c <- 3
+
+	/*
+	 * Channels aren't like files, you don't usually need to close them.
+	 * Closing is only necessary when the receiver must be told there are
+	 * no more values coming, **such as to terminate a range loop**.
+	 */
+
+	// So we have no need to close the channel in this example.
+	fmt.Println(<-c)
+	fmt.Println(<-c)
+}
+
+/*
+ * A sender can close a channel to indicate that no more values will be sent.
+ * Receivers can test whether a channel has been closed by assigning a second
+ * parameter to the receive expression: after
+ *
+ *     v, ok := <-ch
+ *
+ * ok is false if there are no more values to receive and the channel is
+ * closed.
+ *
+ * The loop for i := range c receives values from the channel repeatedly until
+ * it is closed.
+ *
+ * Note: Only the sender should close a channel, never the receiver. Sending
+ * on a closed channel will cause a panic.
+ *
+ * Another note: Channels aren't like files, you don't usually need to close
+ * them. Closing is only necessary when the receiver must be told there are
+ * no more values coming, **such as to terminate a range loop**.
+ */
+func page65_RangeAndClose() {
+	fibonacci := func(n int, c chan int) {
+		x, y := 0, 1
+		for i := 0; i < n; i++ {
+			c <- x
+			x, y = y, x+y
+		}
+
+		/*
+		 * This is a sender, and it can close the channel to tell the receiver
+		 * there are no more values.
+		 */
+		close(c)
+	}
+
+	c := make(chan int, 10)
+	go fibonacci(cap(c), c)
+
+	// range can also used for a channel
+	for i := range c {
+		fmt.Println(i)
+	}
+
+	// following code demonstrate how to test whether a channel has been closed
+	c1 := make(chan int, 2)
+	c1 <- 1
+	c1 <- 2
+	close(c1)
+	for {
+		v, ok := <-c1
+		if ok {
+			fmt.Println(v)
+		} else {
+			fmt.Println("Channel has been closed by the sender.")
+			break
+		}
+	}
+}
+
+/*
+ * The select statement lets a goroutine wait on multiple communication
+ * operations.
+ *
+ * A select blocks until one of its cases can run, then it executes that
+ * case. It chooses one at random if multiple are ready.
+ */
+func page66_Select() {
+	fibonacci := func(c, quit chan int) {
+		x, y := 0, 1
+		for {
+			select {
+			case c <- x:
+				x, y = y, x+y
+			case <-quit:
+				fmt.Println("quit")
+				return
+			}
+		}
+	}
+
+	c := make(chan int)
+	quit := make(chan int)
+	go func() {
+		for i := 0; i < 10; i++ {
+			fmt.Println(<-c)
+		}
+		quit <- 0
+	}()
+	fibonacci(c, quit)
+}
+
+/*
+ * The default case in a select is run if no other case is ready.
+ *
+ * Use a default case to try a send or receive without blocking:
+ *
+ *     select {
+ *     case i := <-c:
+ *         // use i
+ *     default:
+ *         // receiving from c would block
+ *     }
+ */
+func page67_DefaultSelection() {
+	tick := time.Tick(1e8)  // every 100 Milliseconds
+	boom := time.After(5e8) // after 500 Milliseconds
+
+	for {
+		select {
+		case <-tick:
+			fmt.Println("tick.")
+		case <-boom:
+			fmt.Println("BOOM!")
+			return
+		default:
+			fmt.Println("    .")
+			time.Sleep(5e7) // 50 Milliseconds
+		}
+	}
+}
+
+func page68_Exercise_EquivalentBinaryTrees() {
+	// test Walk
+	/*
+		ch := make(chan int)
+		go Walk(tree.New(1), ch)
+		for i := 0; i < 10; i++ {
+			fmt.Println(<-ch)
+		}
+	*/
+
+	fmt.Println(Same(tree.New(1), tree.New(1)))
+	fmt.Println(Same(tree.New(1), tree.New(2)))
+}
+
+// Walk walks the tree t sending all values from the tree to the channel ch.
+func Walk(t *tree.Tree, ch chan int) {
+	if t.Left != nil {
+		Walk(t.Left, ch)
+	}
+
+	// Need to use inorder traversal
+	ch <- t.Value
+
+	if t.Right != nil {
+		Walk(t.Right, ch)
+	}
+}
+
+// Same determines whether the trees t1 and t2 contain the same values.
+func Same(t1, t2 *tree.Tree) bool {
+	c1 := make(chan int)
+	c2 := make(chan int)
+
+	go Walk(t1, c1)
+	go Walk(t2, c2)
+
+	for i := 0; i < 10; i++ {
+		if <-c1 != <-c2 {
+			return false
+		}
+	}
+
+	return true
+}
+
+func page70_Exercise_WebCrawler() {
+	var fetcher = &fakeFetcher{
+		"http://golang.org/": &fakeResult{
+			"The Go Programming Language",
+			[]string{
+				"http://golang.org/pkg/",
+				"http://golang.org/cmd/",
+			},
+		},
+		"http://golang.org/pkg/": &fakeResult{
+			"Packages",
+			[]string{
+				"http://golang.org/",
+				"http://golang.org/cmd/",
+				"http://golang.org/pkg/fmt/",
+				"http://golang.org/pkg/os/",
+			},
+		},
+		"http://golang.org/pkg/fmt/": &fakeResult{
+			"Package fmt",
+			[]string{
+				"http://golang.org/",
+				"http://golang.org/pkg/",
+			},
+		},
+		"http://golang.org/pkg/os/": &fakeResult{
+			"Package os",
+			[]string{
+				"http://golang.org/",
+				"http://golang.org/pkg/",
+			},
+		},
+	}
+
+	Crawl("http://golang.org/", 4, fetcher)
+}
+
+type Fetcher interface {
+	// Fetch returns the body of URL and
+	// a slice of URLs found on that page.
+	Fetch(url string) (body string, urls []string, err error)
+}
+
+type fakeFetcher map[string]*fakeResult
+
+type fakeResult struct {
+	body string
+	urls []string
+}
+
+func (f *fakeFetcher) Fetch(url string) (string, []string, error) {
+	if res, ok := (*f)[url]; ok {
+		return res.body, res.urls, nil
+	}
+	return "", nil, fmt.Errorf("not found: %s", url)
+}
+
+// Original
+/*
+func Crawl(url string, depth int, fetcher Fetcher) {
+	// TODO: Fetch URLs in parallel.
+	// TODO: Don't fetch the same URL twice.
+	if depth <= 0 {
+		return
+	}
+
+	body, urls, err := fetcher.Fetch(url)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	fmt.Printf("found: %s %q\n", url, body)
+	for _, u := range urls {
+		Crawl(u, depth-1, fetcher)
+	}
+	return
+}
+*/
+
+/*
+ * ----------------------------------------------------------------------------
+ * |                                                                          |
+ * | All analyize of the tasks and solutions that followed refer to:          |
+ * |                                                                          |
+ * |     http://soniacodes.wordpress.com/2011/10/09/a-tour-of-go-69           |
+ * |            -exercise-web-crawler/                                        |
+ * |                                                                          |
+ * ----------------------------------------------------------------------------
+ *
+ * For the second TODO task, we need to use a map to store urls which have
+ * already been fetched.
+ *
+ * For the first TODO task, following things should be noticed:
+ *
+ * 1. Concurrent map access is not safe without synchronization. That means
+ * these multiple goroutines need to access the map at one time. If we don't
+ * serialize access to the map, we risk wrong answers or even corrupt memory
+ * and crash.
+ *
+ * 2. Also not covered is that fmt.Println should be synchronized as well. It
+ * turns out that we have no guarantee from the operating system even that
+ * output from multiple threads won't get interleaved.
+ *
+ * 3. Finally, covered so subtly that you probably missed it is that a Go
+ * program terminates when main terminates, **without waiting for other
+ * goroutines**. We will start goroutines to crawl urls found on the page, but
+ * then we need to do something to wait for them to complete.
+ */
+
+// Approach 1: bad - use an additional argument to carry the map
+/*
+func Crawl(url string, depth int, fetcher Fetcher) {
+	_crawl_(url, depth, fetcher, map[string]bool{url: true})
+}
+
+func _crawl_(url string, depth int, fetcher Fetcher, m map[string]bool) {
+	// TODO: Fetch URLs in parallel.
+	if depth <= 0 {
+		return
+	}
+
+	body, urls, err := fetcher.Fetch(url)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	fmt.Printf("found: %s %q\n", url, body)
+	for _, u := range urls {
+		if !m[u] {
+			m[u] = true
+			_crawl_(u, depth-1, fetcher, m)
+		}
+	}
+	return
+}
+*/
+
+// Approach 2: an excellent and popular technique - a recursive closure
+/*
+func Crawl(url string, depth int, fetcher Fetcher) {
+	m := map[string]bool{url: true}
+
+	var _crawl_ func(string, int)
+	_crawl_ = func(url string, depth int) {
+		// TODO: Fetch URLs in parallel.
+		if depth <= 0 {
+			return
+		}
+
+		body, urls, err := fetcher.Fetch(url)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		fmt.Printf("found: %s %q\n", url, body)
+		for _, u := range urls {
+			if !m[u] {
+				m[u] = true
+				_crawl_(u, depth-1)
+			}
+		}
+		return
+	}
+
+	_crawl_(url, depth)
+}
+*/
+
+// Approach 3: object oriented
+/*
+type crawlHistory struct {
+	fetcher Fetcher
+	m       map[string]bool
+}
+
+func Crawl(url string, depth int, fetcher Fetcher) {
+	c := &crawlHistory{fetcher, map[string]bool{url: true}}
+	c._crawl_(url, depth)
+}
+
+func (c *crawlHistory) _crawl_(url string, depth int) {
+	// TODO: Fetch URLs in parallel.
+	if depth <= 0 {
+		return
+	}
+
+	body, urls, err := c.fetcher.Fetch(url)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	fmt.Printf("found: %s %q\n", url, body)
+	for _, u := range urls {
+		if !c.m[u] {
+			c.m[u] = true
+			c._crawl_(u, depth-1)
+		}
+	}
+	return
+}
+*/
+
+// Approach 3 improved: embed Fetcher
+/*
+type crawlHistory struct {
+	Fetcher
+	m map[string]bool
+}
+
+func Crawl(url string, depth int, fetcher Fetcher) {
+	c := &crawlHistory{fetcher, map[string]bool{url: true}}
+	c._crawl_(url, depth)
+}
+
+func (c *crawlHistory) _crawl_(url string, depth int) {
+	// TODO: Fetch URLs in parallel.
+	if depth <= 0 {
+		return
+	}
+
+	// The call to Fetch is shorten from
+	//     c.fetcher.Fetch(url)
+	// to
+	//     c.Fetch(url)
+	body, urls, err := c.Fetch(url)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	fmt.Printf("found: %s %q\n", url, body)
+	for _, u := range urls {
+		if !c.m[u] {
+			c.m[u] = true
+			c._crawl_(u, depth-1)
+		}
+	}
+	return
+}
+*/
+
+type crawlShared struct {
+	// embedded for Fetch method.
+	Fetcher
+
+	// the "salt shaker" pattern: a channel holds the shared map
+	mapAccess chan map[string]bool
+
+	// about the same pattern, except that there is nothing obvious
+	// to put in the channel. Instead, a boolean value is used as a
+	// token. The value is ignored. All that matters is the presence
+	// or absence of the token in the channel.
+	printAccess chan bool
+}
+
+func Crawl(url string, depth int, fetcher Fetcher) {
+	c := &crawlShared{
+		fetcher,
+		make(chan map[string]bool, 1),
+		make(chan bool, 1),
+	}
+
+	// Put the salt shaker on the table. That is, put the map
+	// in the channel, making it available to goroutines.
+	c.mapAccess <- map[string]bool{url: true}
+
+	// same with the token to serialize printing
+	c.printAccess <- true
+
+	// Run goroutine to crawl top level url.
+	// Since we are starting exactly one goroutine here, we wait
+	// for a single completion report. Receipt means that all
+	// lower levels have also completed and it is safe to return
+	// -- and allow the caller to return, in this case, main().
+	done := make(chan bool)
+	go c._crawl_(url, depth, done)
+	<-done
+}
+
+func (c *crawlShared) _crawl_(url string, depth int, pageDone chan bool) {
+	// use defer rather than do this right before every return statement
+	defer func() {
+		pageDone <- true
+	}()
+
+	// The function has multiple return points. All of them must
+	// report goroutine completion by sending a value on pageDone.
+	if depth <= 0 {
+		// pageDone <- true
+		return
+	}
+
+	body, urls, err := c.Fetch(url)
+	if err != nil {
+		// here's how to print:
+		// take the token (waiting for it if it's not there.)
+		<-c.printAccess
+		// do whatever you need to do while other goroutines are
+		// excluded from printing.		
+		fmt.Println(err)
+		// put the token back, allowing others to print again.
+		c.printAccess <- true
+
+		// pageDone <- true
+		return
+	}
+
+	// same sequence of steps to print found message
+	<-c.printAccess
+	fmt.Printf("found: %s %q\n", url, body)
+	c.printAccess <- true
+
+	// "found" means the url was fetched without error and that
+	// on the fetched page are collected in the slice "urls".
+	// Synchronization to crawl these urls in parallel is implemented
+	// with the uDone channel. Create the channel, count the number of
+	// goroutines started, then wait for exactly that many completion.
+	uDone := make(chan bool)
+	uCount := 0
+
+	// salt shaker pattern for map access: get the map from
+	// the channel, and then hold it while iterating over urls.
+	// This works with the assumption that all of the operations
+	// take trivial time compared to the relatively lengthy time
+	// to fetch a url other than map access (which is what we
+	// exclusive access for!). The only operations are iterating
+	// a string slice, incrementing an integer, and starting
+	// a goroutine. These all run very fast so it is reasonable
+	// best to hold "the lock" that is, exclusive map access, while
+	// running through this loop.
+	m := <-c.mapAccess
+	for _, u := range urls {
+		if !m[u] {
+			m[u] = true
+			uCount++
+			go c._crawl_(u, depth-1, uDone)
+		}
+	}
+	c.mapAccess <- m
+
+	// Comments from me:
+	// c.mapAccess can only guarantee the separation from current goroutine
+	// to other goroutines. But cannot ensure sub-goroutines started by
+	// current goroutine haven't been running yet. That means the
+	// sub-goroutine might waiting for the map resource as well, if the
+	// sub-goroutine runs faster than the for loop here. So the above code
+	// relys on the assumption that the for loop will run faster than the
+	// sub-goroutines. 
+
+	// wait for the number of goroutines started just above.
+	for ; uCount > 0; uCount-- {
+		<-uDone
+	}
+
+	// and finally, report completion of this level
+	// pageDone <- true
+	// return
+}
+
 func main() {
-	page62_Goroutines()
+	test(page70_Exercise_WebCrawler, 1)
+}
+
+func test(testCase func(), times int) {
+	start := time.Now()
+	for i := 0; i < times; i++ {
+		testCase()
+	}
+	end := time.Now()
+
+	ellapse := end.Sub(start)
+	average := int64(ellapse) / (int64(times) * 1e6)
+	fmt.Printf("times: %v, ellapse: %v, average: %vms", times, ellapse, average)
 }
