@@ -1,9 +1,5 @@
 package sliceme
 
-import (
-	"fmt"
-)
-
 type Iterator func(item interface{}, index int) interface{}
 
 func Map(s []interface{}, iter Iterator) []interface{} {
